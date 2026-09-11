@@ -31,3 +31,6 @@ The copyright attribution for the arter source is `YasuRolled`.
 - Added the Windows `winmm` link dependency required by raylib's timer functions.
 - Successfully built `build/agte.exe` with the MSYS2 UCRT64 toolchain.
 - Improved font rendering by enabling bilinear filtering for the embedded Lilex and icon textures, and increased toolbar text sizes to prevent clipped-looking glyphs.
+- Centralized text insertion so typing, Enter, Tab, and paste replace active selections instead of inserting inside them.
+- Added save-result handling, save error feedback, caret auto-scrolling, right-side modifier support, macOS Command shortcuts, and initialization checks for the window and embedded fonts.
+- Removed obsolete commented-out autoscroll code and hardened buffer growth and existing-file read failures.

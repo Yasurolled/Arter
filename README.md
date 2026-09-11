@@ -26,6 +26,8 @@ The project is a fork of agte with a responsive layout, a rebuilt application sh
 - Responsive editor layout with toolbar, status bar, and save-state sidebar
 - Keyboard-first editing with cursor movement and Shift selection
 - Clipboard operations with current-line fallback when nothing is selected
+- Selection replacement for typing, Enter, Tab, and paste
+- Automatic caret scrolling and visible save-error feedback
 - Right-click context menu for Copy, Cut, Paste, and Select All
 - Resizable window, fullscreen toggle, and a 640x360 minimum size
 - Embedded Lilex Nerd Font with icon indicators

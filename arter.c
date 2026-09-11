@@ -27,7 +27,9 @@
 #include "raygui.h"
 #include "raylib.h"
 #include <math.h>
+#include <limits.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #define NOT_SAVED "\U000F0F42"
 #define CHANGES "\U000F0CFB"
@@ -97,7 +99,11 @@ cap_enough (char **buffer, size_t *current_cap, size_t needed_cap)
       return true;
     }
 
-  size_t next_cap = (*current_cap * 2);
+  size_t next_cap = *current_cap;
+  if (next_cap <= SIZE_MAX / 2)
+    next_cap *= 2;
+  else
+    next_cap = SIZE_MAX;
   if (next_cap < needed_cap)
     {
       next_cap = needed_cap;
@@ -198,7 +204,7 @@ set_style ()
 Fonts
 fetch_fonts (void)
 {
-  Fonts f;
+  Fonts f = { 0 };
 
   const char *icons_available = "\U000F0F42"
                                 "\U000F0CFB"
@@ -208,6 +214,8 @@ fetch_fonts (void)
   int codepoint_count = 0; // just to flush
 
   int *codepoints = LoadCodepoints (icons_available, &codepoint_count);
+  if (codepoints == NULL)
+    return f;
 
   f.icons = LoadFontFromMemory (".ttf", LilexNerdFontMono_Regular_ttf,
                                 LilexNerdFontMono_Regular_ttf_len, 64,
@@ -244,6 +252,7 @@ typedef struct
   bool context_menu_open;
   Vector2 context_menu_pos;
   bool quit_requested;
+  char status_message[128];
 
 } editor_state;
 
@@ -261,16 +270,8 @@ editor_init (editor_state *state, const char *path)
       state->buffer = load_file (path, &state->length);
       if (state->buffer == NULL)
         {
-
-          state->buffer = malloc (1);
-          if (state->buffer == NULL) // git test comment
-            {
-              printf ("FATAL ERROR: out of memory\n");
-              return false;
-            }
-          state->buffer[0] = '\0';
-          state->buffer_capacity = 1;
-          state->length = 0;
+          printf ("ERROR: could not read %s\n", path);
+          return false;
         }
       else
         {
@@ -299,20 +300,113 @@ editor_init (editor_state *state, const char *path)
   state->context_menu_open = false;
   state->context_menu_pos = (Vector2){ 0, 0 };
   state->quit_requested = false;
+  state->status_message[0] = '\0';
 
   return true;
 }
 
 void
+get_selection_bounds (const editor_state *state, int *out_start, int *out_end)
+{
+  *out_start = state->cursor_posi;
+  *out_end = state->cursor_posi;
+  if (state->selection_anchor < *out_start)
+    *out_start = state->selection_anchor;
+  else
+    *out_end = state->selection_anchor;
+}
+
+bool
+insert_text (editor_state *state, const char *text, size_t text_length)
+{
+  int selection_start, selection_end;
+  get_selection_bounds (state, &selection_start, &selection_end);
+  size_t removed_length = (size_t)(selection_end - selection_start);
+
+  if (text_length > SIZE_MAX - (size_t)state->length - 1 + removed_length)
+    return false;
+
+  size_t next_length = (size_t)state->length - removed_length + text_length;
+  if (next_length > INT_MAX)
+    return false;
+  if (!cap_enough (&state->buffer, &state->buffer_capacity, next_length + 1))
+    return false;
+
+  state->length = (int)((size_t)state->length - removed_length);
+  state->cursor_posi = selection_start;
+  memmove (state->buffer + state->cursor_posi + text_length,
+           state->buffer + state->cursor_posi,
+           (size_t)(state->length - state->cursor_posi + 1));
+  memcpy (state->buffer + state->cursor_posi, text, text_length);
+  state->length = (int)next_length;
+  state->cursor_posi += (int)text_length;
+  state->selection_anchor = state->cursor_posi;
+  state->modified = true;
+  state->status_message[0] = '\0';
+  return true;
+}
+
+bool
+save_document (editor_state *state)
+{
+  if (!SaveFileText (state->file_path, state->buffer))
+    {
+      snprintf (state->status_message, sizeof state->status_message,
+                "Could not save %s", state->file_path);
+      return false;
+    }
+
+  state->file_exists = true;
+  state->modified = false;
+  state->status_message[0] = '\0';
+  return true;
+}
+
+bool
+control_down (void)
+{
+  bool down = IsKeyDown (KEY_LEFT_CONTROL) || IsKeyDown (KEY_RIGHT_CONTROL);
+#if defined(__APPLE__)
+  down = down || IsKeyDown (KEY_LEFT_SUPER) || IsKeyDown (KEY_RIGHT_SUPER);
+#endif
+  return down;
+}
+
+bool
+shift_down (void)
+{
+  return IsKeyDown (KEY_LEFT_SHIFT) || IsKeyDown (KEY_RIGHT_SHIFT);
+}
+
+void
+keep_cursor_visible (editor_state *state, editor_layout layout)
+{
+  float line_height = 22.0f;
+  float advance = state->char_width + 0.5f;
+  float cursor_x = layout.editor.x + 32.0f + state->scroll.x
+                   + state->cursor_col * advance;
+  float cursor_y = layout.editor.y + 16.0f + state->scroll.y
+                   + state->cursor_line * line_height;
+  float left = layout.editor.x + 32.0f;
+  float right = layout.editor.x + layout.editor.width - 24.0f;
+  float top = layout.editor.y + 8.0f;
+  float bottom = layout.editor.y + layout.editor.height - 24.0f;
+
+  if (cursor_x < left)
+    state->scroll.x += left - cursor_x;
+  else if (cursor_x + 2.0f > right)
+    state->scroll.x -= cursor_x + 2.0f - right;
+  if (cursor_y < top)
+    state->scroll.y += top - cursor_y;
+  else if (cursor_y + line_height > bottom)
+    state->scroll.y -= cursor_y + line_height - bottom;
+}
+
+void
 copy_selection (editor_state *state)
 {
-  int selection_start = state->cursor_posi;
-  int selection_end = state->cursor_posi;
-
-  if (state->selection_anchor < selection_start)
-    selection_start = state->selection_anchor;
-  else
-    selection_end = state->selection_anchor;
+  int selection_start, selection_end;
+  get_selection_bounds (state, &selection_start, &selection_end);
 
   if (selection_start == selection_end)
     {
@@ -341,12 +435,8 @@ copy_selection (editor_state *state)
 void
 delete_selection (editor_state *state)
 {
-  int selection_start = state->cursor_posi;
-  int selection_end = state->cursor_posi;
-  if (state->selection_anchor < selection_start)
-    selection_start = state->selection_anchor;
-  else
-    selection_end = state->selection_anchor;
+  int selection_start, selection_end;
+  get_selection_bounds (state, &selection_start, &selection_end);
 
   if (selection_start == selection_end)
     return;
@@ -384,27 +474,14 @@ context_menu_input (editor_state *state)
             {
               const char *clipboard = GetClipboardText ();
               if (clipboard != NULL)
-                {
-                  int clipboard_len = (int)strlen (clipboard);
-                  if (cap_enough (&state->buffer, &state->buffer_capacity,
-                                  (size_t)state->length + clipboard_len + 1))
-                    {
-                      memmove (state->buffer + state->cursor_posi + clipboard_len,
-                               state->buffer + state->cursor_posi,
-                               (size_t)(state->length - state->cursor_posi + 1));
-                      memcpy (state->buffer + state->cursor_posi, clipboard,
-                              (size_t)clipboard_len);
-                      state->length += clipboard_len;
-                      state->cursor_posi += clipboard_len;
-                      state->selection_anchor = state->cursor_posi;
-                      state->modified = true;
-                    }
-                }
+                insert_text (state, clipboard, strlen (clipboard));
             }
           else
             {
               state->selection_anchor = 0;
               state->cursor_posi = state->length;
+              get_cursor_coordinates (state->buffer, state->cursor_posi,
+                                      &state->cursor_line, &state->cursor_col);
             }
         }
       state->context_menu_open = false;
@@ -430,7 +507,7 @@ editor_handle_input (editor_state *state)
   if (context_menu_input (state))
     return;
 
-  if (IsKeyDown (KEY_LEFT_CONTROL) && IsKeyPressed (KEY_Q))
+  if (control_down () && IsKeyPressed (KEY_Q))
     {
       state->quit_requested = true;
       return;
@@ -442,25 +519,8 @@ editor_handle_input (editor_state *state)
   int key = GetCharPressed (); // how actual letters are handled
   while (key > 0)
     {
-      if ((key > 31) && (key < 126))
-        {
-          if (cap_enough (&state->buffer, &state->buffer_capacity,
-                          state->length + 2))
-            {
-
-              for (int i = state->length; i > state->cursor_posi; i--)
-                {
-                  state->buffer[i] = state->buffer[i - 1];
-                }
-              state->buffer[state->cursor_posi] = (char)key;
-              state->length++;
-              state->cursor_posi++;
-              state->buffer[state->length] = '\0';
-              state->modified = true;
-
-              state->selection_anchor = state->cursor_posi;
-            }
-        }
+      if ((key > 31) && (key <= 126))
+        insert_text (state, (char[]){ (char)key }, 1);
       key = GetCharPressed ();
     }
 
@@ -497,36 +557,20 @@ editor_handle_input (editor_state *state)
             }
         }
       else
-        {
-          int delete_len = selection_end - selection_start;
-
-          for (int i = selection_end; i <= state->length; i++)
-            {
-              state->buffer[i - delete_len] = state->buffer[i];
-            }
-          state->length -= delete_len;
-          state->cursor_posi = selection_start;
-          state->selection_anchor = selection_start;
-          state->modified = true;
-          state->buffer[state->length] = '\0';
-        }
+        delete_selection (state);
     }
 
-  if (IsKeyDown (KEY_LEFT_CONTROL) && IsKeyPressed (KEY_S))
-    {
-      SaveFileText (state->file_path, state->buffer);
-      state->file_exists = true;
-      state->modified = false;
-    }
+  if (control_down () && IsKeyPressed (KEY_S))
+    save_document (state);
 
   if ((IsKeyPressedRepeat (KEY_LEFT) || IsKeyPressed (KEY_LEFT))
-      && !IsKeyDown (KEY_LEFT_SHIFT) && state->cursor_posi > 0)
+      && !shift_down () && state->cursor_posi > 0)
     {
       state->cursor_posi--;
       state->selection_anchor = state->cursor_posi;
     }
   if ((IsKeyPressed (KEY_RIGHT) || IsKeyPressedRepeat (KEY_RIGHT))
-      && !IsKeyDown (KEY_LEFT_SHIFT) && state->length > state->cursor_posi)
+      && !shift_down () && state->length > state->cursor_posi)
     {
       state->cursor_posi++;
       state->selection_anchor = state->cursor_posi;
@@ -535,7 +579,7 @@ editor_handle_input (editor_state *state)
                           &state->cursor_line, &state->cursor_col);
 
   if ((IsKeyPressed (KEY_UP) || IsKeyPressedRepeat (KEY_UP))
-      && !IsKeyDown (KEY_LEFT_SHIFT) && state->cursor_line > 0)
+      && !shift_down () && state->cursor_line > 0)
     {
       int target_line = state->cursor_line - 1;
       int line = 0;
@@ -565,7 +609,7 @@ editor_handle_input (editor_state *state)
     }
 
   if ((IsKeyPressed (KEY_DOWN) || IsKeyPressedRepeat (KEY_DOWN))
-      && !IsKeyDown (KEY_LEFT_SHIFT))
+      && !shift_down ())
     {
       int target_line = state->cursor_line + 1;
       int line = 0;
@@ -604,22 +648,7 @@ editor_handle_input (editor_state *state)
     }
 
   if (IsKeyPressed (KEY_ENTER) || (IsKeyPressedRepeat (KEY_ENTER)))
-    {
-      if (cap_enough (&state->buffer, &state->buffer_capacity,
-                      state->length + 2))
-        {
-          for (int i = state->length; i > state->cursor_posi; i--)
-            {
-              state->buffer[i] = state->buffer[i - 1];
-            }
-          state->buffer[state->cursor_posi] = '\n';
-          state->length++;
-          state->cursor_posi++;
-          state->buffer[state->length] = '\0';
-          state->modified = true;
-        }
-      state->selection_anchor = state->cursor_posi;
-    }
+    insert_text (state, "\n", 1);
 
   if (IsKeyPressed (KEY_PAGE_UP))
     {
@@ -633,7 +662,7 @@ editor_handle_input (editor_state *state)
       state->selection_anchor = state->cursor_posi;
     }
 
-  if ((IsKeyDown (KEY_LEFT_CONTROL)) && (IsKeyPressed (KEY_C)))
+  if (control_down () && IsKeyPressed (KEY_C))
     {
       int selection_start, selection_end;
 
@@ -696,7 +725,7 @@ editor_handle_input (editor_state *state)
         }
     }
 
-  if ((IsKeyDown (KEY_LEFT_CONTROL)) && (IsKeyPressed (KEY_X)))
+  if (control_down () && IsKeyPressed (KEY_X))
     {
 
       int selection_start, selection_end;
@@ -772,50 +801,16 @@ editor_handle_input (editor_state *state)
       state->modified = true;
     }
 
-  if ((IsKeyDown (KEY_LEFT_CONTROL)) && (IsKeyPressed (KEY_V)))
+  if (control_down () && IsKeyPressed (KEY_V))
     {
 
       const char *clipboard = GetClipboardText ();
       if (clipboard && clipboard[0] != '\0')
-        {
-          int clipboard_len = strlen (clipboard);
-          if (cap_enough (&state->buffer, &state->buffer_capacity,
-                          state->length + clipboard_len + 1))
-            {
-              for (int i = state->length; i >= state->cursor_posi; i--)
-                {
-                  state->buffer[i + clipboard_len] = state->buffer[i];
-                }
-              memcpy (state->buffer + state->cursor_posi, clipboard,
-                      clipboard_len);
-              state->length += clipboard_len;
-              state->cursor_posi += clipboard_len;
-              state->buffer[state->length] = '\0';
-              state->modified = true;
-            }
-        }
-      state->selection_anchor = state->cursor_posi;
+        insert_text (state, clipboard, strlen (clipboard));
     }
 
   if (IsKeyPressed (KEY_TAB))
-    {
-
-      if (cap_enough (&state->buffer, &state->buffer_capacity,
-                      state->length + 3))
-        {
-          for (int i = state->length; i >= state->cursor_posi; i--)
-            {
-              state->buffer[i + 2] = state->buffer[i];
-            }
-          memcpy (&state->buffer[state->cursor_posi], "  ", 2);
-
-          state->length += 2;
-          state->cursor_posi += 2;
-          state->buffer[state->length] = '\0';
-          state->modified = true;
-        }
-      state->selection_anchor = state->cursor_posi;
-    }
+    insert_text (state, "  ", 2);
 
   int caps_helper = GetKeyPressed ();
 
@@ -840,7 +835,7 @@ editor_handle_input (editor_state *state)
 
   // SELECTION AREA MOVEMENT
 
-  if (IsKeyDown (KEY_LEFT_CONTROL)
+  if (control_down ()
       && IsKeyPressed (KEY_A)) // this placement felt a lil more coherent.
     {
       state->selection_anchor = 0;
@@ -849,7 +844,7 @@ editor_handle_input (editor_state *state)
                               &state->cursor_line, &state->cursor_col);
     }
 
-  if ((IsKeyDown (KEY_LEFT_SHIFT)
+  if ((shift_down ()
        && (IsKeyPressedRepeat (KEY_LEFT) || IsKeyPressed (KEY_LEFT)))
       && state->cursor_posi > 0)
     {
@@ -858,7 +853,7 @@ editor_handle_input (editor_state *state)
                               &state->cursor_line, &state->cursor_col);
     }
 
-  if ((IsKeyDown (KEY_LEFT_SHIFT)
+  if ((shift_down ()
        && (IsKeyPressed (KEY_RIGHT) || IsKeyPressedRepeat (KEY_RIGHT)))
       && state->length > state->cursor_posi)
     {
@@ -867,7 +862,7 @@ editor_handle_input (editor_state *state)
                               &state->cursor_line, &state->cursor_col);
     }
 
-  if (IsKeyDown (KEY_LEFT_SHIFT)
+  if (shift_down ()
       && ((IsKeyPressed (KEY_UP) || IsKeyPressedRepeat (KEY_UP)))
       && state->cursor_line > 0)
     {
@@ -897,7 +892,7 @@ editor_handle_input (editor_state *state)
       state->cursor_posi = start + new_col;
     }
 
-  if (IsKeyDown (KEY_LEFT_SHIFT)
+  if (shift_down ()
       && (IsKeyPressed (KEY_DOWN) || IsKeyPressedRepeat (KEY_DOWN)))
     {
       int target_line = state->cursor_line + 1;
@@ -937,6 +932,7 @@ editor_handle_input (editor_state *state)
 
   get_cursor_coordinates (state->buffer, state->cursor_posi,
                           &state->cursor_line, &state->cursor_col);
+  keep_cursor_visible (state, get_editor_layout ());
 }
 
 /*****************************************************************************/
@@ -948,7 +944,7 @@ editor_render (editor_state *state, Fonts *fonts)
   ClearBackground (BETTER_BLACK);
   draw_editor_borders (layout);
 
-  DrawTextEx (fonts->Lilex, "agte", (Vector2){ 18, 11 }, 22, 1, MAUVE);
+  DrawTextEx (fonts->Lilex, "arter", (Vector2){ 18, 11 }, 22, 1, MAUVE);
   DrawTextEx (fonts->Lilex, state->file_path, (Vector2){ 94, 12 }, 18, 1,
               BETTER_WHITE);
   DrawTextEx (fonts->Lilex, "Ctrl+S save   Ctrl+Q quit   right-click menu",
@@ -1175,6 +1171,10 @@ editor_render (editor_state *state, Fonts *fonts)
   DrawTextEx (fonts->Lilex, state->modified ? "MODIFIED" : "READY",
               (Vector2){ layout.status.width - 100, layout.status.y + 6 }, 14,
               1, state->modified ? BETTER_ORANGE : BETTER_BLUE);
+  if (state->status_message[0] != '\0')
+    DrawTextEx (fonts->Lilex, state->status_message,
+                (Vector2){ layout.status.width - 300, layout.status.y + 6 },
+                14, 1, BETTER_RED);
 
   if (state->context_menu_open)
     {
@@ -1209,10 +1209,25 @@ main (int argc, char *argv[])
 
   SetConfigFlags (FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
   InitWindow (1280, 720, "arter");
+  if (!IsWindowReady ())
+    {
+      free (state.buffer);
+      return -1;
+    }
   SetWindowMinSize (640, 360);
   SetTargetFPS (60);
 
   Fonts fonts = fetch_fonts ();
+  if (!IsFontValid (fonts.Lilex) || !IsFontValid (fonts.icons))
+    {
+      if (IsFontValid (fonts.Lilex))
+        UnloadFont (fonts.Lilex);
+      if (IsFontValid (fonts.icons))
+        UnloadFont (fonts.icons);
+      free (state.buffer);
+      CloseWindow ();
+      return -1;
+    }
 
   state.char_width = MeasureTextEx (fonts.Lilex, "WW", 20, 1).x / 2.0f;
 
