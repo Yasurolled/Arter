@@ -1,0 +1,18 @@
+# Local build output
+build/
+
+# Default document created by agte when no filename is supplied
+untitled.txt
+
+# Portable tools downloaded for local development
+.tools/
+
+# Local editor settings
+.vscode/
+
+# IDE and compiler output
+*.obj
+*.o
+*.exe
+*.dll
+*.pdb

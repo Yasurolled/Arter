@@ -1,6 +1,6 @@
 /*
- *  agte - A Graphical (GUI) Text Editor
- *  Copyright (C) 2026 B. Keskin
+ *  arter - A Graphical (GUI) Text Editor, forked from agte
+ *  Copyright (C) 2026 YasuRolled
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU Affero General Public License as published
@@ -15,7 +15,7 @@
  *  You should have received a copy of the GNU Affero General Public License
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *
- *  Contact me at bkeskinsoftware@gmail.com
+ *  Contact me at yasurolled@proton.me
  */
 
 #include <stdbool.h>
@@ -49,6 +49,14 @@ typedef struct
   Font Lilex;
   Font icons;
 } Fonts;
+
+typedef struct
+{
+  Rectangle toolbar;
+  Rectangle editor;
+  Rectangle status;
+  Rectangle sidebar;
+} editor_layout;
 
 /*****************************************************************************/
 
@@ -129,21 +137,41 @@ get_cursor_coordinates (const char *buffer, int cursor_posi, int *out_line,
 
 /*****************************************************************************/
 
-void
-draw_editor_borders ()
+editor_layout
+get_editor_layout (void)
 {
-  DrawLine (1200, 0, 1200, 720, MAUVE);
-  DrawLine (1, 1, 1200, 1, MAUVE);
-  DrawLine (1, 1, 1, 708, MAUVE);
-  DrawLine (1, 720, 1200, 720, MAUVE);
+  float width = (float)GetScreenWidth ();
+  float height = (float)GetScreenHeight ();
+  float toolbar_height = 48.0f;
+  float status_height = 28.0f;
+  float sidebar_width = fminf (96.0f, fmaxf (72.0f, width * 0.08f));
 
-  DrawLine (1200, 1, 1279, 1, MAUVE);
-  DrawLine (1279, 1, 1279, 719, MAUVE);
-  DrawLine (1200, 1, 1200, 719, MAUVE);
+  editor_layout layout = {
+    { 0, 0, width, toolbar_height },
+    { 0, toolbar_height, width - sidebar_width,
+      fmaxf (120.0f, height - toolbar_height - status_height) },
+    { 0, height - status_height, width - sidebar_width, status_height },
+    { width - sidebar_width, toolbar_height, sidebar_width,
+      fmaxf (120.0f, height - toolbar_height - status_height) }
+  };
+  return layout;
+}
 
-  DrawLine (1188, 1, 1188, 719, MAUVE);
-
-  DrawLine (1200, 707, 1, 707, MAUVE);
+void
+draw_editor_borders (editor_layout layout)
+{
+  DrawRectangle (0, 0, GetScreenWidth (), GetScreenHeight (), BETTER_BLACK);
+  DrawRectangle (layout.toolbar.x, layout.toolbar.y, layout.toolbar.width,
+                 layout.toolbar.height, (Color){ 0x1A, 0x1A, 0x27, 255 });
+  DrawRectangle (layout.sidebar.x, layout.sidebar.y, layout.sidebar.width,
+                 layout.sidebar.height, (Color){ 0x16, 0x16, 0x22, 255 });
+  DrawRectangle (layout.status.x, layout.status.y, layout.status.width,
+                 layout.status.height, (Color){ 0x1A, 0x1A, 0x27, 255 });
+  DrawLine (0, layout.toolbar.height, GetScreenWidth (), layout.toolbar.height,
+            MAUVE);
+  DrawLine (layout.sidebar.x, layout.toolbar.height, layout.sidebar.x,
+            GetScreenHeight (), MAUVE);
+  DrawLine (0, layout.status.y, layout.sidebar.x, layout.status.y, MAUVE);
 }
 
 /*****************************************************************************/
@@ -190,6 +218,8 @@ fetch_fonts (void)
   f.Lilex
       = LoadFontFromMemory (".ttf", LilexNerdFontMono_Regular_ttf,
                             LilexNerdFontMono_Regular_ttf_len, 20, NULL, 0);
+  SetTextureFilter (f.Lilex.texture, TEXTURE_FILTER_BILINEAR);
+  SetTextureFilter (f.icons.texture, TEXTURE_FILTER_BILINEAR);
   return f;
 }
 
@@ -211,6 +241,9 @@ typedef struct
   int cursor_col;
   float char_width;
   int selection_anchor;
+  bool context_menu_open;
+  Vector2 context_menu_pos;
+  bool quit_requested;
 
 } editor_state;
 
@@ -263,7 +296,119 @@ editor_init (editor_state *state, const char *path)
 
   state->cursor_posi = state->length;
   state->selection_anchor = state->cursor_posi;
+  state->context_menu_open = false;
+  state->context_menu_pos = (Vector2){ 0, 0 };
+  state->quit_requested = false;
 
+  return true;
+}
+
+void
+copy_selection (editor_state *state)
+{
+  int selection_start = state->cursor_posi;
+  int selection_end = state->cursor_posi;
+
+  if (state->selection_anchor < selection_start)
+    selection_start = state->selection_anchor;
+  else
+    selection_end = state->selection_anchor;
+
+  if (selection_start == selection_end)
+    {
+      selection_start = state->cursor_posi;
+      while (selection_start > 0 && state->buffer[selection_start - 1] != '\n')
+        selection_start--;
+      selection_end = state->cursor_posi;
+      while (selection_end < state->length && state->buffer[selection_end] != '\n')
+        selection_end++;
+    }
+
+  if (selection_end > selection_start)
+    {
+      char *text = malloc ((size_t)(selection_end - selection_start) + 1);
+      if (text != NULL)
+        {
+          memcpy (text, state->buffer + selection_start,
+                  (size_t)(selection_end - selection_start));
+          text[selection_end - selection_start] = '\0';
+          SetClipboardText (text);
+          free (text);
+        }
+    }
+}
+
+void
+delete_selection (editor_state *state)
+{
+  int selection_start = state->cursor_posi;
+  int selection_end = state->cursor_posi;
+  if (state->selection_anchor < selection_start)
+    selection_start = state->selection_anchor;
+  else
+    selection_end = state->selection_anchor;
+
+  if (selection_start == selection_end)
+    return;
+
+  memmove (state->buffer + selection_start, state->buffer + selection_end,
+           (size_t)(state->length - selection_end + 1));
+  state->length -= selection_end - selection_start;
+  state->cursor_posi = selection_start;
+  state->selection_anchor = selection_start;
+  state->modified = true;
+}
+
+bool
+context_menu_input (editor_state *state)
+{
+  if (!state->context_menu_open)
+    return false;
+
+  Rectangle menu = { state->context_menu_pos.x, state->context_menu_pos.y,
+                     180, 144 };
+  if (IsMouseButtonPressed (MOUSE_BUTTON_LEFT))
+    {
+      Vector2 mouse = GetMousePosition ();
+      if (CheckCollisionPointRec (mouse, menu))
+        {
+          int item = (int)((mouse.y - menu.y) / 36);
+          if (item == 0)
+            copy_selection (state);
+          else if (item == 1)
+            {
+              copy_selection (state);
+              delete_selection (state);
+            }
+          else if (item == 2)
+            {
+              const char *clipboard = GetClipboardText ();
+              if (clipboard != NULL)
+                {
+                  int clipboard_len = (int)strlen (clipboard);
+                  if (cap_enough (&state->buffer, &state->buffer_capacity,
+                                  (size_t)state->length + clipboard_len + 1))
+                    {
+                      memmove (state->buffer + state->cursor_posi + clipboard_len,
+                               state->buffer + state->cursor_posi,
+                               (size_t)(state->length - state->cursor_posi + 1));
+                      memcpy (state->buffer + state->cursor_posi, clipboard,
+                              (size_t)clipboard_len);
+                      state->length += clipboard_len;
+                      state->cursor_posi += clipboard_len;
+                      state->selection_anchor = state->cursor_posi;
+                      state->modified = true;
+                    }
+                }
+            }
+          else
+            {
+              state->selection_anchor = 0;
+              state->cursor_posi = state->length;
+            }
+        }
+      state->context_menu_open = false;
+    }
   return true;
 }
 
@@ -272,6 +417,28 @@ editor_init (editor_state *state, const char *path)
 void
 editor_handle_input (editor_state *state)
 {
+  if (IsMouseButtonPressed (MOUSE_BUTTON_RIGHT))
+    {
+      state->context_menu_pos = GetMousePosition ();
+      if (state->context_menu_pos.x > GetScreenWidth () - 184)
+        state->context_menu_pos.x = GetScreenWidth () - 184;
+      if (state->context_menu_pos.y > GetScreenHeight () - 148)
+        state->context_menu_pos.y = GetScreenHeight () - 148;
+      state->context_menu_open = true;
+    }
+
+  if (context_menu_input (state))
+    return;
+
+  if (IsKeyDown (KEY_LEFT_CONTROL) && IsKeyPressed (KEY_Q))
+    {
+      state->quit_requested = true;
+      return;
+    }
+
+  if (IsKeyPressed (KEY_F11))
+    ToggleFullscreen ();
+
   int key = GetCharPressed (); // how actual letters are handled
   while (key > 0)
     {
@@ -777,7 +944,16 @@ editor_handle_input (editor_state *state)
 void
 editor_render (editor_state *state, Fonts *fonts)
 {
+  editor_layout layout = get_editor_layout ();
   ClearBackground (BETTER_BLACK);
+  draw_editor_borders (layout);
+
+  DrawTextEx (fonts->Lilex, "agte", (Vector2){ 18, 11 }, 22, 1, MAUVE);
+  DrawTextEx (fonts->Lilex, state->file_path, (Vector2){ 94, 12 }, 18, 1,
+              BETTER_WHITE);
+  DrawTextEx (fonts->Lilex, "Ctrl+S save   Ctrl+Q quit   right-click menu",
+              (Vector2){ layout.toolbar.width - 350, 16 }, 14, 1,
+              (Color){ 0x9A, 0x9A, 0xAE, 255 });
 
   int line_count = 1; // calculated for content area, for scroll logic.
   int max_line_len = 0;
@@ -805,23 +981,24 @@ editor_render (editor_state *state, Fonts *fonts)
       max_line_len = current_len;
     }
 
-  Rectangle panel = { 0, 0, 1200, 720 };
+    Rectangle panel = layout.editor;
   Rectangle content
       = { 0, 0,
           fmaxf (panel.width, 32 + max_line_len * (state->char_width + 0.5F)),
-          fmaxf (707, (line_count * 22) + 22) };
+        fmaxf (panel.height, (line_count * 22) + 22) };
 
   GuiScrollPanel (panel, NULL, content, &state->scroll, &state->view);
   BeginScissorMode (state->view.x, state->view.y, state->view.width,
                     state->view.height);
 
   DrawTextEx (fonts->Lilex, state->buffer,
-              (Vector2){ 32 + state->scroll.x, 16 + state->scroll.y }, 20, 1,
+              (Vector2){ panel.x + 32 + state->scroll.x,
+                         panel.y + 16 + state->scroll.y }, 20, 1,
               BETTER_WHITE);
 
-  float cursor_x = 32 + state->scroll.x
+  float cursor_x = panel.x + 32 + state->scroll.x
                    + (state->cursor_col * (state->char_width + 0.5f));
-  float cursor_y = 16 + state->scroll.y + (state->cursor_line * 22);
+  float cursor_y = panel.y + 16 + state->scroll.y + (state->cursor_line * 22);
 
   // DRAWING THE SELECTION HIGHLIGHT
 
@@ -851,15 +1028,15 @@ editor_render (editor_state *state, Fonts *fonts)
       if (start_line == end_line)
         {
 
-          float highligt_x1 = 32 + state->scroll.x
+            float highligt_x1 = panel.x + 32 + state->scroll.x
                               + start_col * ((state->char_width) + 0.5f);
 
-          float highligt_y1 = 16 + state->scroll.y + start_line * 22;
+            float highligt_y1 = panel.y + 16 + state->scroll.y + start_line * 22;
 
-          float highligt_x2
-              = 32 + state->scroll.x + end_col * ((state->char_width) + 0.5f);
+            float highligt_x2 = panel.x + 32 + state->scroll.x
+                      + end_col * ((state->char_width) + 0.5f);
 
-          float highligt_y2 = 16 + state->scroll.y + end_line * 22;
+            float highligt_y2 = panel.y + 16 + state->scroll.y + end_line * 22;
 
           DrawRectangle (
               highligt_x1, highligt_y1, highligt_x2 - highligt_x1,
@@ -894,10 +1071,10 @@ editor_render (editor_state *state, Fonts *fonts)
 
           int first_line_len = first_line_end - first_line_start;
 
-          float x1
-              = 32 + state->scroll.x + start_col * (state->char_width + 0.5f);
-          float y1 = 16 + state->scroll.y + start_line * 22;
-          float x2 = 32 + state->scroll.x
+            float x1 = panel.x + 32 + state->scroll.x
+                 + start_col * (state->char_width + 0.5f);
+            float y1 = panel.y + 16 + state->scroll.y + start_line * 22;
+            float x2 = panel.x + 32 + state->scroll.x
                      + first_line_len * (state->char_width + 0.5f);
 
           DrawRectangle (x1, y1, x2 - x1, 22, HIGHLIGHT);
@@ -929,18 +1106,18 @@ editor_render (editor_state *state, Fonts *fonts)
 
               int mid_line_len = mid_line_end - mid_line_start;
 
-              float mid_x1 = 32 + state->scroll.x;
-              float mid_y1 = 16 + state->scroll.y + (mid_line * 22);
-              float mid_x2 = 32 + state->scroll.x
+              float mid_x1 = panel.x + 32 + state->scroll.x;
+              float mid_y1 = panel.y + 16 + state->scroll.y + (mid_line * 22);
+              float mid_x2 = panel.x + 32 + state->scroll.x
                              + mid_line_len * (state->char_width + 0.5f);
 
               DrawRectangle (mid_x1, mid_y1, mid_x2 - mid_x1, 22, HIGHLIGHT);
             }
 
-          float last_x1 = 32 + state->scroll.x;
-          float last_y1 = 16 + state->scroll.y + end_line * 22;
-          float last_x2
-              = 32 + state->scroll.x + end_col * (state->char_width + 0.5f);
+            float last_x1 = panel.x + 32 + state->scroll.x;
+            float last_y1 = panel.y + 16 + state->scroll.y + end_line * 22;
+            float last_x2 = panel.x + 32 + state->scroll.x
+                    + end_col * (state->char_width + 0.5f);
 
           DrawRectangle (last_x1, last_y1, last_x2 - last_x1, 22, HIGHLIGHT);
         }
@@ -951,8 +1128,6 @@ editor_render (editor_state *state, Fonts *fonts)
                  BETTER_WHITE); /*this is the cursor*/
 
   EndScissorMode ();
-
-  draw_editor_borders ();
 
   // ICONS SECTION
 
@@ -979,20 +1154,43 @@ editor_render (editor_state *state, Fonts *fonts)
       saved_icon_size = 64;
     }
 
-  DrawTextEx (fonts->icons, saved_icon_text, (Vector2){ 1225, 16 },
-              saved_icon_size, 1, saved_icon_color); /* icon placement
-              needs its own
-              helper logic
-              because they
-              are slightly
-              different
-              sizes so thats
-              TODO */
+  DrawTextEx (fonts->icons, saved_icon_text,
+              (Vector2){ layout.sidebar.x + 19, layout.sidebar.y + 18 },
+              saved_icon_size, 1, saved_icon_color);
 
   if (state->caps)
     {
-      DrawTextEx (fonts->icons, CAPS, (Vector2){ 1223, 66 }, 64, 1,
+      DrawTextEx (fonts->icons, CAPS,
+                  (Vector2){ layout.sidebar.x + 17, layout.sidebar.y + 70 },
+                  64, 1,
                   BETTER_BLUE);
+    }
+
+  char status[128];
+  snprintf (status, sizeof status, "Ln %d, Col %d    %d lines    %d chars",
+            state->cursor_line + 1, state->cursor_col + 1, line_count,
+            state->length);
+  DrawTextEx (fonts->Lilex, status, (Vector2){ 16, layout.status.y + 6 }, 14,
+              1, BETTER_WHITE);
+  DrawTextEx (fonts->Lilex, state->modified ? "MODIFIED" : "READY",
+              (Vector2){ layout.status.width - 100, layout.status.y + 6 }, 14,
+              1, state->modified ? BETTER_ORANGE : BETTER_BLUE);
+
+  if (state->context_menu_open)
+    {
+      Rectangle menu = { state->context_menu_pos.x, state->context_menu_pos.y,
+                         180, 144 };
+      DrawRectangleRec (menu, (Color){ 0x24, 0x24, 0x35, 255 });
+      DrawRectangleLinesEx (menu, 1, MAUVE);
+      DrawTextEx (fonts->Lilex, "Copy", (Vector2){ menu.x + 14, menu.y + 9 },
+                  16, 1, BETTER_WHITE);
+      DrawTextEx (fonts->Lilex, "Cut", (Vector2){ menu.x + 14, menu.y + 45 },
+                  16, 1, BETTER_WHITE);
+      DrawTextEx (fonts->Lilex, "Paste", (Vector2){ menu.x + 14, menu.y + 81 },
+                  16, 1, BETTER_WHITE);
+      DrawTextEx (fonts->Lilex, "Select all",
+                  (Vector2){ menu.x + 14, menu.y + 117 }, 16, 1,
+                  BETTER_WHITE);
     }
 }
 
@@ -1031,23 +1229,17 @@ autoscroll (editor_state *state)
 int
 main (int argc, char *argv[])
 {
-
-  if (argc < 2)
-    {
-      printf ("usage: agte <filename>\n");
-      /* BUT launching without arguements could launch a file explorer which
-       * im looking into building tbh. */
-      return -1;
-    }
-
   editor_state state;
+  const char *path = argc >= 2 ? argv[1] : "untitled.txt";
 
-  if (editor_init (&state, argv[1]) == false)
+  if (editor_init (&state, path) == false)
     {
       return -1;
     }
 
-  InitWindow (1280, 720, "agte");
+  SetConfigFlags (FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+  InitWindow (1280, 720, "arter");
+  SetWindowMinSize (640, 360);
   SetTargetFPS (60);
 
   Fonts fonts = fetch_fonts ();
@@ -1056,7 +1248,7 @@ main (int argc, char *argv[])
 
   set_style ();
 
-  while (!WindowShouldClose ())
+  while (!WindowShouldClose () && !state.quit_requested)
     {
       BeginDrawing ();
 

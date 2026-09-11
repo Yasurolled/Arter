@@ -1,27 +1,28 @@
-# agte
+# arter
 
-agte (A Graphical Text Editor) is meant to be an alternative to nano. It's written in C and meant to be as light and portable as possible.
+arter is a small, keyboard-first graphical text editor written in C. It is a fork of [agte](https://github.com/bkeskinsoftware/agte), redesigned with a responsive layout, a context menu, and a cross-platform CMake build. It uses raylib for its window, input, clipboard, and rendering layer, so the same source can target Windows, Linux, and macOS.
+
+This project keeps the original agte codebase's lightweight spirit while evolving its interface and build workflow under the arter name.
+
+Development of arter was made with the help of GitHub Copilot.
 
 ## Installation
 
-Use the provided .deb or .rpm package in the releases seciton to install agte. Follow your GNU/Linux distribution's package manager usage as normal. 
-
-Unfortunately, other package formats are not offered yet and users are expected to compile from source.
+Use a release package when available, or build from source with raylib and raygui installed. No platform-specific UI toolkit is required.
 
 ## Usage
 
-```bash
-agte filename.fileextension
+```text
+arter [filename]
 ```
-(giving an extension is optional and you can have a plain text document with no extension at all if you just provide a name)
+
+The filename is optional. Starting without one opens `untitled.txt` in the current directory. A missing file is created when you save it.
 
 It will create the file in your current directory, or open it if the file already exists.
 
-Indicators located at the right panel will show if the file exists, if its up to date or not and if the Caps Lock is engaged or not.
+The responsive sidebar shows the save state and Caps Lock state. Resize the window freely, or press F11 for fullscreen.
 
-In the current version agte does not check if the file you are opening is a valid text format, if a folder is provided, it will act as normal but saving will be impossible.
-
-This is undefined behavior so please be cautious on providing a valid file.
+arter treats files as text and does not inspect their encoding. Opening a folder or a binary file is unsupported.
 
 <img width="1443" height="918" alt="image" src="https://github.com/user-attachments/assets/05b00403-0b92-4b5d-a820-42a158e8101e" />
 
@@ -42,23 +43,46 @@ if no selection is provided, these controls will work on the current line as who
 
 CTRL + S saves the document.
 
-In the current version there is no "save as" capability so make sure you always have a copy of the document if you wish to keep it.
+CTRL + Q closes the editor. F11 toggles fullscreen. Right-click opens a context menu with copy, cut, paste, and select-all actions.
 
 Tab indents 2 characters deep.
 
 ## Compilation
 
+The recommended route is CMake:
+
 ```bash
--I. libraylib.a -lGL -lm -lpthread -ldl -lrt -lX11
+cmake -S . -B build
+cmake --build build --config Release
 ```
 
-I compile agte with the shown flags, I do not distribute raylib, so please generate your own libraylib.a file if you wish to make your own portable binary with links or package it for your format of choice.
+Install raylib through your platform's package manager and place `raygui.h` in the project root, or point CMake at its containing directory with `-DRAYGUI_INCLUDE_DIR=/path/to/raygui`.
+
+On Windows with MSYS2, use the **UCRT64** terminal:
+
+```bash
+pacman -S --needed mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-raylib
+curl --fail --location --output raygui.h https://raw.githubusercontent.com/raysan5/raygui/master/src/raygui.h
+cmake -S . -B build -G "MinGW Makefiles" -DRAYGUI_INCLUDE_DIR="$PWD"
+cmake --build build
+```
+
+The project links raylib's required Windows libraries automatically.
+
+On Debian or Ubuntu:
+
+```bash
+sudo apt-get install build-essential cmake libraylib-dev
+curl --fail --location --output raygui.h https://raw.githubusercontent.com/raysan5/raygui/master/src/raygui.h
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRAYGUI_INCLUDE_DIR="$PWD"
+cmake --build build --parallel
+```
+
+On macOS, install raylib with Homebrew, place `raygui.h` in the project root, and use the same CMake commands. The source does not assume a path separator or OS-specific input API.
 
 ## Contributing
 
-Feel free to use the issues section, and even fork agte. For further communication, "bkeskinsoftware@gmail.com".
-
-Are you willing to package agte for your package manager of choice? Let me know about it!
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and pull request expectations. Bug reports and feature ideas are welcome through GitHub Issues.
 
 ## License
 
@@ -66,14 +90,12 @@ Are you willing to package agte for your package manager of choice? Let me know 
 
 ## footnote
 Known limitations are:
-* Window size is set at 1280x720.
 * No "valid format" check present.
 * No full UTF support has been implemented.
 * No "undo" and "redo" functions.
-* Although it is a standalone GUI program, it is still meant to be launched in the terminal.
 * Poor Caps Lock logic that only shows if the state has been changed, doesn't check the actual position. Kept that way to ensure OS Agnostic nature.
 
-> These limitations are to be tackled in following versions along with a dedicated file explorer and a superior layout handling system, perhaps even a terminal emulator. Although lack of UTF-8 support is a great limitation for a text editor, it is a change that requires going back to the drawing board. The whole project needs an actual redesign to be quite honest, and I'm working on it. Decisions have to be made around the intended platforms so stuff like actually fetching the Caps Lock position and more become possible. Community feedback is extremely valuable and will be taken into account.
+The editor intentionally stays small: it has no bundled file explorer, terminal, or platform-specific file dialog yet.
 
 raylib source code is NOT distributed along the program, it is baked into the binary statically.
 

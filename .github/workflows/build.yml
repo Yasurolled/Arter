@@ -1,0 +1,26 @@
+name: Build arter
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libraylib-dev
+          curl --fail --location --output raygui.h \
+            https://raw.githubusercontent.com/raysan5/raygui/master/src/raygui.h
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRAYGUI_INCLUDE_DIR="$GITHUB_WORKSPACE"
+
+      - name: Build
+        run: cmake --build build --parallel
