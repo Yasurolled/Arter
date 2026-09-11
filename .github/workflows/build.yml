@@ -15,12 +15,25 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libraylib-dev
+          sudo apt-get install -y build-essential cmake libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev
+
+      - name: Build raylib
+        run: |
+          git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib
+          cmake -S raylib -B raylib-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$HOME/.local" \
+            -DBUILD_EXAMPLES=OFF
+          cmake --build raylib-build --parallel
+          cmake --install raylib-build
+
+      - name: Download raygui
+        run: |
           curl --fail --location --output raygui.h \
             https://raw.githubusercontent.com/raysan5/raygui/master/src/raygui.h
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRAYGUI_INCLUDE_DIR="$GITHUB_WORKSPACE"
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$HOME/.local" -DRAYGUI_INCLUDE_DIR="$GITHUB_WORKSPACE"
 
       - name: Build
         run: cmake --build build --parallel
