@@ -1,102 +1,100 @@
 # arter
 
-arter is a small, keyboard-first graphical text editor written in C. It is a fork of [agte](https://github.com/bkeskinsoftware/agte), redesigned with a responsive layout, a context menu, and a cross-platform CMake build. It uses raylib for its window, input, clipboard, and rendering layer, so the same source can target Windows, Linux, and macOS.
+<p align="center">
+	<strong>A small, sharp, keyboard-first text editor for the desktop.</strong><br>
+	A modernized fork of <a href="https://github.com/BDestroyerOfWorlds/agte">agte</a>, built in C with raylib.
+</p>
 
-This project keeps the original agte codebase's lightweight spirit while evolving its interface and build workflow under the arter name.
+<p align="center">
+	<a href="https://github.com/Yasurolled/Arter/actions/workflows/build.yml"><img src="https://github.com/Yasurolled/Arter/actions/workflows/build.yml/badge.svg" alt="Build status"></a>
+	<a href="https://github.com/Yasurolled/Arter/blob/main/LICENCE.txt"><img src="https://img.shields.io/badge/license-AGPL--3.0-CBA6F7.svg" alt="AGPL-3.0 license"></a>
+	<a href="https://github.com/Yasurolled/Arter"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-89B4FA.svg" alt="Windows Linux macOS"></a>
+</p>
 
-Development of arter was made with the help of GitHub Copilot.
+<p align="center">
+	<img src="preview.png" alt="arter text editor preview" width="900">
+</p>
 
-## Installation
+## Why arter?
 
-Use a release package when available, or build from source with raylib and raygui installed. No platform-specific UI toolkit is required.
+arter keeps the immediacy of a terminal editor and gives it a focused graphical workspace. It starts quickly, stays lightweight, and puts the document at the center of the screen.
 
-## Usage
+The project is a fork of agte with a responsive layout, a rebuilt application shell, cross-platform CMake support, and a more deliberate workflow for future development. It was developed with the help of GitHub Copilot.
+
+## Features
+
+- Responsive editor layout with toolbar, status bar, and save-state sidebar
+- Keyboard-first editing with cursor movement and Shift selection
+- Clipboard operations with current-line fallback when nothing is selected
+- Right-click context menu for Copy, Cut, Paste, and Select All
+- Resizable window, fullscreen toggle, and a 640x360 minimum size
+- Embedded Lilex Nerd Font with icon indicators
+- CMake build configuration for Windows, Linux, and macOS
+
+## Quick start
 
 ```text
 arter [filename]
 ```
 
-The filename is optional. Starting without one opens `untitled.txt` in the current directory. A missing file is created when you save it.
-
-It will create the file in your current directory, or open it if the file already exists.
-
-The responsive sidebar shows the save state and Caps Lock state. Resize the window freely, or press F11 for fullscreen.
-
-arter treats files as text and does not inspect their encoding. Opening a folder or a binary file is unsupported.
-
-<img width="1443" height="918" alt="image" src="https://github.com/user-attachments/assets/05b00403-0b92-4b5d-a820-42a158e8101e" />
+The filename is optional. Without one, arter opens `untitled.txt` in the current directory. Missing files are created when saved.
 
 ## Controls
 
-Arrow keys move the cursor to their respective directions.
+| Action | Shortcut |
+| --- | --- |
+| Move cursor | Arrow keys |
+| Select text | Shift + movement keys |
+| Start/end of document | Page Up / Page Down |
+| Copy, cut, paste | Ctrl+C / Ctrl+X / Ctrl+V |
+| Select all | Ctrl+A |
+| Save | Ctrl+S |
+| Quit | Ctrl+Q |
+| Toggle fullscreen | F11 |
+| Context menu | Right click |
+| Indent | Tab |
 
-Page Up moves the cursor to the beginning of the file.
-Page Down moves the cursor to the end of the file.
+When no text is selected, Copy and Cut operate on the current line.
 
-All movement keys combined with the "Shift" key will move your selection area with the cursor. "Shift" needs to be held down for adjustments and the selection area will reset if any input is given or a movement key is pressed without holding "Shift".
+## Build
 
-CTRL + C copies the selected area or the current line to the clipboard.
-CTRL + X cuts the selected area or the current line to the clipboard.
-CTRL + V pastes the clipboard on the cursor's current location.
+arter requires CMake, raylib, and `raygui.h`. The recommended build uses CMake.
 
-if no selection is provided, these controls will work on the current line as whole ('\n' to '\n'). In other words, it falls back/defaults the line selection.
+### Windows: MSYS2 UCRT64
 
-CTRL + S saves the document.
-
-CTRL + Q closes the editor. F11 toggles fullscreen. Right-click opens a context menu with copy, cut, paste, and select-all actions.
-
-Tab indents 2 characters deep.
-
-## Compilation
-
-The recommended route is CMake:
-
-```bash
-cmake -S . -B build
-cmake --build build --config Release
-```
-
-Install raylib through your platform's package manager and place `raygui.h` in the project root, or point CMake at its containing directory with `-DRAYGUI_INCLUDE_DIR=/path/to/raygui`.
-
-On Windows with MSYS2, use the **UCRT64** terminal:
+Run these commands from the **MSYS2 UCRT64** terminal:
 
 ```bash
 pacman -S --needed mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-raylib
 curl --fail --location --output raygui.h https://raw.githubusercontent.com/raysan5/raygui/master/src/raygui.h
 cmake -S . -B build -G "MinGW Makefiles" -DRAYGUI_INCLUDE_DIR="$PWD"
 cmake --build build
+./build/arter.exe
 ```
 
-The project links raylib's required Windows libraries automatically.
+### Linux
 
-On Debian or Ubuntu:
+Install a C compiler, CMake, OpenGL/X11 development libraries, and raylib from your distribution or from source. Then build raylib 5.5, download raygui, and configure arter:
 
 ```bash
-sudo apt-get install build-essential cmake libraylib-dev
 curl --fail --location --output raygui.h https://raw.githubusercontent.com/raysan5/raygui/master/src/raygui.h
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DRAYGUI_INCLUDE_DIR="$PWD"
 cmake --build build --parallel
+./build/arter
 ```
 
-On macOS, install raylib with Homebrew, place `raygui.h` in the project root, and use the same CMake commands. The source does not assume a path separator or OS-specific input API.
+### macOS
+
+Install raylib with Homebrew, place `raygui.h` in the project root, and use the standard CMake commands above. The source does not depend on platform-specific input or file APIs.
+
+## Project status
+
+arter is usable for small text-editing sessions and is still evolving. Known limitations include no undo/redo stack, incomplete UTF-8 support, no file explorer, and no platform-specific file dialog.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and pull request expectations. Bug reports and feature ideas are welcome through GitHub Issues.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and pull request expectations. Notable changes are recorded in [DEVLOG.md](DEVLOG.md), and bug reports or feature ideas are welcome through GitHub Issues.
 
 ## License
 
-[AGPL-3.0](https://choosealicense.com/licenses/agpl-3.0/)
-
-## footnote
-Known limitations are:
-* No "valid format" check present.
-* No full UTF support has been implemented.
-* No "undo" and "redo" functions.
-* Poor Caps Lock logic that only shows if the state has been changed, doesn't check the actual position. Kept that way to ensure OS Agnostic nature.
-
-The editor intentionally stays small: it has no bundled file explorer, terminal, or platform-specific file dialog yet.
-
-raylib source code is NOT distributed along the program, it is baked into the binary statically.
-
-Do you have any ideas or would you like to help in any way? Please let me know via e-mail.
+arter is licensed under the [AGPL-3.0](LICENCE.txt). raylib and the embedded Lilex font remain under their respective licenses; see the files in `third_party/` and the header comments in `font_data.h`.
