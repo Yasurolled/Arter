@@ -1,0 +1,102 @@
+name: Build release binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub release tag to receive the binaries
+        required: true
+        default: v0.1.0-alpha.1
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev
+
+      - name: Build raylib
+        run: |
+          git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib
+          cmake -S raylib -B raylib-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/.local" -DBUILD_EXAMPLES=OFF
+          cmake --build raylib-build --parallel
+          cmake --install raylib-build
+
+      - name: Build arter
+        run: |
+          curl --fail --location --output raygui.h https://raw.githubusercontent.com/raysan5/raygui/master/src/raygui.h
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$HOME/.local" -DRAYGUI_INCLUDE_DIR="$GITHUB_WORKSPACE"
+          cmake --build build --parallel
+          cp build/arter arter-linux-x86_64
+
+      - name: Upload Linux binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: arter-linux-x86_64
+          path: arter-linux-x86_64
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up MSYS2 UCRT64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-make
+
+      - name: Build arter with MSYS2
+        shell: msys2 {0}
+        run: |
+          git clone --depth 1 --branch 5.5 https://github.com/raysan5/raylib.git raylib
+          cmake -S raylib -B raylib-build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/.local" -DBUILD_EXAMPLES=OFF
+          cmake --build raylib-build --parallel
+          cmake --install raylib-build
+          curl --fail --location --output raygui.h https://raw.githubusercontent.com/raysan5/raygui/master/src/raygui.h
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$HOME/.local" -DRAYGUI_INCLUDE_DIR="$PWD"
+          cmake --build build --parallel
+          cp build/arter.exe arter-windows-x86_64.exe
+
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: arter-windows-x86_64
+          path: arter-windows-x86_64.exe
+
+  publish:
+    name: Attach binaries to release
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: arter-linux-x86_64
+
+      - name: Download Windows binary
+        uses: actions/download-artifact@v4
+        with:
+          name: arter-windows-x86_64
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: gh release upload "$RELEASE_TAG" arter-linux-x86_64 arter-windows-x86_64.exe --repo "$GITHUB_REPOSITORY" --clobber
